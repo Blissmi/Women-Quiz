@@ -2,6 +2,8 @@ require('dotenv').config()
 const express = require('express')
 const Airtable = require('airtable')
 const cors = require('cors')
+const path = require('path')
+const fs = require('fs')
 
 const app = express()
 app.use(cors())
@@ -566,5 +568,15 @@ app.post('/api/build-result', async (req, res) => {
   }
 })
 
+// Serve built frontend if present (production)
 const port = process.env.PORT || 4000
+const distPath = path.join(__dirname, '..', 'dist')
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'))
+  })
+  console.log('Serving static frontend from', distPath)
+}
+
 app.listen(port, () => console.log(`Airtable helper server running on http://localhost:${port}`))
