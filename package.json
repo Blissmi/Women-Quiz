@@ -1,0 +1,37 @@
+{
+  "name": "quiz-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/index.js",
+    "smoke-test": "node scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "airtable": "^0.11.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "framer-motion": "^10.12.16",
+    "html2canvas": "^1.4.1",
+    "dom-to-image-more": "^2.9.0",
+    "ioredis": "^5.10.0",
+    "jspdf": "^4.2.0",
+    "lucide-react": "^0.264.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.24",
+    "@types/react-dom": "^18.2.8",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.2",
+    "vite": "^7.3.1"
+  }
+}
