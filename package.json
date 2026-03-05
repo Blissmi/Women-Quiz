@@ -7,6 +7,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
+    "start": "node server/index.js",
+    "postinstall": "npm run build",
     "smoke-test": "node scripts/smoke-test.js"
   },
   "dependencies": {
