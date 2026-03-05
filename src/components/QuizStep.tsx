@@ -1,7 +1,7 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 import { Check } from 'lucide-react'
-import logo from '@/assets/logo.svg'
+import logo from '@/assets/image.png'
 import { TopBar } from '@/components/ui/TopBar'
 import { PageSection } from '@/components/ui/PageSection'
 

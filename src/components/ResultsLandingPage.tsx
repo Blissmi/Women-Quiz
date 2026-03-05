@@ -1,7 +1,7 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 import { Heart, Moon, Activity } from 'lucide-react'
-import logo from '@/assets/logo.svg'
+import logo from '@/assets/image.png'
 import { StrainBadge } from '@/components/results/StrainBadge'
 import { InsightCard, ActionTile } from '@/components/results/Cards'
 import { SectionHeader } from '@/components/results/SectionHeader'
