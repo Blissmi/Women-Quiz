@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  base: 'https://myblissmi.com/women-event',
+  base: '/womenevent/',
   plugins: [react()],
   server: {
     host: '0.0.0.0',
