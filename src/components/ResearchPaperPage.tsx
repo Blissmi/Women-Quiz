@@ -4,6 +4,7 @@ import { FileText, Download, ArrowLeft, ExternalLink } from 'lucide-react'
 import logo from '@/assets/image.png'
 import { TopBar } from '@/components/ui/TopBar'
 import { PageSection } from '@/components/ui/PageSection'
+import ResearchCTA from '@/components/ui/ResearchCTA'
 
 interface ResearchPaperPageProps {
   onBack: () => void
@@ -140,7 +141,7 @@ export function ResearchPaperPage({ onBack, onStartOver }: ResearchPaperPageProp
           </div>
         </motion.div>
 
-        {/* CTA Section removed per request */}
+        <ResearchCTA />
 
         {/* Footer Note */}
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6, delay: 0.6 }} className="text-center text-sm text-neutral-500 mt-12">
