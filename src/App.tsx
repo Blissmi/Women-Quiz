@@ -158,21 +158,40 @@ export default function App() {
 
           const imgData = trimmed.toDataURL('image/png')
 
-          const pdf = new jsPDF('p', 'mm', 'a4')
-          const pdfWidth = pdf.internal.pageSize.getWidth()
-          const pdfHeight = pdf.internal.pageSize.getHeight()
-
           const imgProps = { width: trimmed.width, height: trimmed.height }
-          const pageHeightPx = Math.floor((trimmed.width * pdfHeight) / pdfWidth)
+
+          // decide PDF sizing after knowing image dimensions
+          const A4_WIDTH_MM = 210
+          let pdf: any
+          let pdfWidth: number
+          let pdfHeight: number
+          // temporary estimate for pageHeightPx when using A4; will be corrected for single-page custom height below
+          const estimatedPdfHeight = 297
+          const pageHeightPx = Math.floor((trimmed.width * estimatedPdfHeight) / A4_WIDTH_MM)
+          let actualPageSlicePx = pageHeightPx
 
           if (imgProps.height <= pageHeightPx) {
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, (imgProps.height * pdfWidth) / imgProps.width)
+            // single-page snapshot: create PDF sized to content + footer to trim whitespace
+            const imageHeightMM = (imgProps.height * A4_WIDTH_MM) / imgProps.width
+            const footerGapMM = 8
+            const footerHeightMM = 12
+            const customPdfHeight = Math.max( imageHeightMM + footerGapMM + footerHeightMM, 50 )
+            pdf = new (jsPDF as any)('p', 'mm', [A4_WIDTH_MM, customPdfHeight])
+            pdfWidth = A4_WIDTH_MM
+            pdfHeight = customPdfHeight
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, imageHeightMM)
           } else {
+            // multi-page: use A4
+            pdf = new (jsPDF as any)('p', 'mm', 'a4')
+            pdfWidth = pdf.internal.pageSize.getWidth()
+            pdfHeight = pdf.internal.pageSize.getHeight()
+            const pageHeightPxReal = Math.floor((trimmed.width * pdfHeight) / pdfWidth)
+            actualPageSlicePx = pageHeightPxReal
             let position = 0
             const totalHeight = imgProps.height
             const pageCanvas = document.createElement('canvas')
             pageCanvas.width = trimmed.width
-            pageCanvas.height = pageHeightPx
+            pageCanvas.height = pageHeightPxReal
             const pageCtx = pageCanvas.getContext('2d')
 
             while (position < totalHeight) {
@@ -185,8 +204,42 @@ export default function App() {
                 pdf.addPage()
                 pdf.addImage(pageData, 'PNG', 0, 0, pdfWidth, pdfHeight)
               }
-              position += pageHeightPx
+              position += actualPageSlicePx
             }
+          }
+
+          // place a two-line centered footer just below the snapshot content on the last page
+          try {
+            const pageCount = (pdf.getNumberOfPages && pdf.getNumberOfPages()) || 1
+            let lastContentHeightMM = 0
+            const footerGapMM = 8
+            if (imgProps.height <= pageHeightPx) {
+              // single-page: rendered image height in mm
+              lastContentHeightMM = (imgProps.height * pdfWidth) / imgProps.width
+            } else {
+              // multi-page: compute remaining pixels on the last slice
+              const totalHeight = imgProps.height
+              const remainder = totalHeight % actualPageSlicePx
+              const lastSlicePx = remainder === 0 ? actualPageSlicePx : remainder
+              // each slice maps to full pdfHeight mm, so scale accordingly
+              lastContentHeightMM = (lastSlicePx * pdfHeight) / actualPageSlicePx
+            }
+
+            const line1 = 'website: www.blissmi.health'
+            const line2 = 'contact: hello@myblissmi.com'
+            const x = pdfWidth / 2
+            const maxY = pdfHeight - 6
+            let y1 = Math.min(lastContentHeightMM + footerGapMM, maxY - 5)
+            if (y1 < 12) y1 = 12
+            const y2 = y1 + 5
+
+            pdf.setPage(pageCount)
+            pdf.setFontSize(10)
+            pdf.setTextColor(100)
+            ;(pdf as any).text(line1, x, y1, { align: 'center' })
+            ;(pdf as any).text(line2, x, y2, { align: 'center' })
+          } catch (e) {
+            console.warn('Failed to add footer to PDF', e)
           }
 
           pdf.save('blissmi-snapshot.pdf')
@@ -210,25 +263,53 @@ export default function App() {
               if (document.body.contains(wrapper)) document.body.removeChild(wrapper)
             } catch (e) {}
 
-            const { jsPDF } = await import('jspdf')
-            const pdf = new jsPDF('p', 'mm', 'a4')
-            const pdfWidth = pdf.internal.pageSize.getWidth()
-            const pdfHeight = pdf.internal.pageSize.getHeight()
-
             // load image to get dimensions
+            const { jsPDF } = await import('jspdf')
             await new Promise<void>((resolve, reject) => {
               const img = new Image()
               img.onload = () => {
                 const imgProps = { width: img.width, height: img.height }
-                const pageHeightPx = Math.floor((imgProps.width * pdfHeight) / pdfWidth)
+                // decide PDF sizing
+                const A4_WIDTH_MM = 210
+                let pdf: any
+                let pdfWidth: number
+                let pdfHeight: number
+                const pageHeightPxForA4 = Math.floor((imgProps.width * 297) / A4_WIDTH_MM)
 
-                if (imgProps.height <= pageHeightPx) {
-                  pdf.addImage(pngData, 'PNG', 0, 0, pdfWidth, (imgProps.height * pdfWidth) / imgProps.width)
+                if (imgProps.height <= pageHeightPxForA4) {
+                  const imageHeightMM = (imgProps.height * A4_WIDTH_MM) / imgProps.width
+                  const footerGapMM = 8
+                  const footerHeightMM = 12
+                  const customPdfHeight = Math.max(imageHeightMM + footerGapMM + footerHeightMM, 50)
+                  pdf = new (jsPDF as any)('p', 'mm', [A4_WIDTH_MM, customPdfHeight])
+                  pdfWidth = A4_WIDTH_MM
+                  pdfHeight = customPdfHeight
+                  pdf.addImage(pngData, 'PNG', 0, 0, pdfWidth, imageHeightMM)
+                  try {
+                    const pageCount = (pdf.getNumberOfPages && pdf.getNumberOfPages()) || 1
+                    const line1 = 'website: www.blissmi.health'
+                    const line2 = 'contact: hello@myblissmi.com'
+                    const x = pdfWidth / 2
+                    const maxY = pdfHeight - 6
+                    let y1 = Math.min(imageHeightMM + footerGapMM, maxY - 5)
+                    if (y1 < 12) y1 = 12
+                    const y2 = y1 + 5
+                    pdf.setPage(pageCount)
+                    pdf.setFontSize(10)
+                    pdf.setTextColor(100)
+                    ;(pdf as any).text(line1, x, y1, { align: 'center' })
+                    ;(pdf as any).text(line2, x, y2, { align: 'center' })
+                  } catch (e) { console.warn('Failed to add footer to PDF', e) }
                   pdf.save('blissmi-snapshot.pdf')
                   setDownloadStatus('success')
                   resolve()
                 } else {
                   // split into pages using canvas
+                  // create A4 PDF for multi-page
+                  pdf = new (jsPDF as any)('p', 'mm', 'a4')
+                  pdfWidth = pdf.internal.pageSize.getWidth()
+                  pdfHeight = pdf.internal.pageSize.getHeight()
+
                   const tmpCanvas = document.createElement('canvas')
                   tmpCanvas.width = img.width
                   tmpCanvas.height = img.height
@@ -238,9 +319,11 @@ export default function App() {
                   // Trim bottom/blank whitespace from the tmp canvas
                   const trimmedTmp = trimCanvasWhitespace(tmpCanvas)
 
+                  const pageSlicePx = Math.floor((trimmedTmp.width * pdfHeight) / pdfWidth)
+
                   const pageCanvas = document.createElement('canvas')
                   pageCanvas.width = trimmedTmp.width
-                  pageCanvas.height = pageHeightPx
+                  pageCanvas.height = pageSlicePx
                   const pageCtx = pageCanvas.getContext('2d')
                   let position = 0
                   const totalHeight = trimmedTmp.height
@@ -255,8 +338,27 @@ export default function App() {
                       pdf.addPage()
                       pdf.addImage(pageData, 'PNG', 0, 0, pdfWidth, pdfHeight)
                     }
-                    position += pageHeightPx
+                    position += pageSlicePx
                   }
+                  try {
+                    const pageCount = (pdf.getNumberOfPages && pdf.getNumberOfPages()) || 1
+                    const remainder = trimmedTmp.height % pageSlicePx
+                    const lastSlicePx = remainder === 0 ? pageSlicePx : remainder
+                    const lastContentHeightMM = (lastSlicePx * pdfHeight) / pageSlicePx
+                    const footerGapMM = 8
+                    const line1 = 'website: www.blissmi.health'
+                    const line2 = 'contact: hello@myblissmi.com'
+                    const x = pdfWidth / 2
+                    const maxY = pdfHeight - 6
+                    let y1 = Math.min(lastContentHeightMM + footerGapMM, maxY - 5)
+                    if (y1 < 12) y1 = 12
+                    const y2 = y1 + 5
+                    pdf.setPage(pageCount)
+                    pdf.setFontSize(10)
+                    pdf.setTextColor(100)
+                    ;(pdf as any).text(line1, x, y1, { align: 'center' })
+                    ;(pdf as any).text(line2, x, y2, { align: 'center' })
+                  } catch (e) { console.warn('Failed to add footer to PDF', e) }
                   pdf.save('blissmi-snapshot.pdf')
                   setDownloadStatus('success')
                   resolve()
