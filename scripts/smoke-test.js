@@ -65,6 +65,22 @@ async function testBuildResult() {
   return true
 }
 
+async function testPersistResult() {
+  const url = `${BASE}/api/results`
+  const payload = {
+    userId: 'smoke-test-user',
+    sessionId: `sess-${Date.now()}`,
+    score: 3,
+    answers: [{ q: 'ageBand', a: '35_39' }],
+    meta: { source: 'smoke-test' }
+  }
+  const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+  if (res.status !== 201) throw new Error(`results returned status ${res.status}`)
+  const body = await res.json()
+  if (!body.id) throw new Error('results response missing id')
+  return true
+}
+
 async function run() {
   console.log('Running smoke tests against', BASE)
   const failures = []
@@ -90,6 +106,14 @@ async function run() {
   } catch (e) {
     console.error('✖ build-result FAILED:', e.message)
     failures.push('build-result')
+  }
+
+  try {
+    await testPersistResult()
+    console.log('✔ results OK')
+  } catch (e) {
+    console.error('✖ results FAILED:', e.message)
+    failures.push('results')
   }
 
   if (failures.length) {

@@ -1,0 +1,15 @@
+{
+  "$id": "https://example.com/schemas/quiz-result.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "userId": { "type": ["string", "null"] },
+    "sessionId": { "type": ["string", "null"] },
+    "score": { "type": ["number", "null"] },
+    "answers": { "type": ["array", "object", "null"] },
+    "meta": { "type": ["object", "null"] },
+    "raw": { "type": "object" }
+  },
+  "required": ["raw"],
+  "additionalProperties": true
+}

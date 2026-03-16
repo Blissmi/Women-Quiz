@@ -28,4 +28,17 @@ Caching behavior
 - Responses are cached for 5 minutes by default.
 - When `REDIS_URL` is provided, the server writes JSON values to Redis with TTL.
 
+Postgres persistence (quiz results)
+
+- This server can persist quiz results to Postgres using the `pg` client.
+- Create the DB user and grant privileges (example):
+
+  CREATE USER blissmi_user WITH PASSWORD 'strongpassword';
+  GRANT ALL PRIVILEGES ON DATABASE blissmi_db TO blissmi_user;
+
+- Provide connection either via `DATABASE_URL` (recommended) or the `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` env vars. See `.env.example` in the project root.
+- The server will ensure the `quiz_results` table exists on startup. The table stores `answers`, `meta`, and the raw payload as JSONB and indexes `created_at` and `user_id`.
+- Endpoint: `POST /api/results` accepts a JSON payload (e.g. `{ "userId": "...", "sessionId": "...", "answers": [...], "meta": {...}, "score": 12 }`) and returns `201` with `{ id, createdAt }` on success.
+
+
 *** End Patch

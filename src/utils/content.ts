@@ -34,7 +34,8 @@ const DEFAULT_BLOCK_TYPES = [
 export async function fetchContentBlocks(blockTypes: string[] = DEFAULT_BLOCK_TYPES, serverBaseUrl = ''): Promise<ContentBlock[]> {
   const params = new URLSearchParams()
   if (blockTypes && blockTypes.length) params.append('blockTypes', blockTypes.join(','))
-  const url = `${serverBaseUrl}/api/content-blocks?${params.toString()}`
+  const base = (serverBaseUrl || '').replace(/\/$/, '')
+  const url = `${base}/api/content-blocks?${params.toString()}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Failed to fetch content blocks: ${res.statusText}`)
   const data = await res.json()
@@ -43,7 +44,7 @@ export async function fetchContentBlocks(blockTypes: string[] = DEFAULT_BLOCK_TY
 
 // Fetch a reduced set of blocks from server (by blockTypes) then apply local filtering.
 export async function fetchAndFilterContentBlocks(opts: FetchOpts = {}): Promise<ContentBlock[]> {
-  const serverBase = opts.serverBaseUrl ?? (import.meta.env.VITE_API_BASE || 'http://localhost:4000')
+  const serverBase = (opts.serverBaseUrl ?? (import.meta.env.VITE_API_BASE || '')).replace(/\/$/, '')
   const blockTypes = opts.blockTypes ?? DEFAULT_BLOCK_TYPES
   const records = await fetchContentBlocks(blockTypes, serverBase)
 

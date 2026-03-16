@@ -54,6 +54,11 @@ if (REDIS_URL) {
   redisClient.on('error', e => console.error('Redis error', e))
 }
 
+// Postgres DB helper
+const db = require('./db')
+const { validateQuizResult } = require('./validation')
+const { computeResultFromPayload } = require('./compute')
+
 const CACHE_TTL_MS = 1000 * 60 * 5 // 5 minutes
 const cache = new Map()
 
@@ -568,8 +573,129 @@ app.post('/api/build-result', async (req, res) => {
   }
 })
 
+// POST /api/results - persist quiz results to Postgres
+app.post('/api/results', async (req, res) => {
+  try {
+    const payload = req.body || {}
+    // Log minimal identifying info to help debug missing submissions in production
+    try {
+      const src = (payload && payload.meta && payload.meta.source) || null
+      const sess = payload.sessionId || payload.session_id || null
+      console.info('/api/results incoming - ip:', req.ip || req.connection && req.connection.remoteAddress, 'sessionId:', sess, 'source:', src)
+    } catch (e) {
+      // ignore logging errors
+    }
+    if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'Invalid payload' })
+
+    // Minimal validation: require either answers or meta or score
+    // Validate schema
+    const normalized = Object.assign({}, payload)
+    // ensure raw wrapper exists so schema can require it reliably
+    if (!normalized.raw) normalized.raw = payload
+
+    const v = validateQuizResult(normalized)
+    if (!v.valid) {
+      // return validation errors for debugging; keep messages concise
+      return res.status(400).json({ error: 'Invalid payload', details: v.errors })
+    }
+
+    // Attempt to compute the strain/result server-side from provided answers
+    try {
+      // payload.answers may be an object (frontend) or an array of {q,a}
+      let answersObj = {}
+      if (payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers)) {
+        answersObj = payload.answers
+      } else if (Array.isArray(payload.answers)) {
+        payload.answers.forEach(a => {
+          if (a && typeof a.q === 'string') answersObj[a.q] = a.a
+        })
+      }
+
+      // Prefer direct top-level fields too
+      const lifeStage = payload.lifeStage || payload.stage || answersObj.lifeStage || answersObj.life_stage || answersObj.lifeStageLabel || null
+      const energy = payload.energy || answersObj.energy || null
+      const sleep = payload.sleep || answersObj.sleep || null
+      const stress = payload.stress || answersObj.stress || null
+
+      // compute strain level only when at least one of the inputs is present
+      if (energy || sleep || stress) {
+        const strainLevel = calculateStrainLevel(energy, sleep, stress)
+        let label = 'Unknown'
+        if (strainLevel === 'green') label = 'Stable'
+        else if (strainLevel === 'amber') label = 'Under Pressure'
+        else if (strainLevel === 'red') label = 'Needs Attention'
+
+        payload.meta = payload.meta || {}
+        payload.meta.computed = payload.meta.computed || {}
+        payload.meta.computed.strainLevel = strainLevel
+        payload.meta.computed.strainLabel = label
+        payload.meta.computed.inputs = { lifeStage, energy, sleep, stress }
+      }
+    } catch (err) {
+      // non-fatal: continue to insert raw payload
+      console.warn('Failed computing result server-side:', err && err.message ? err.message : err)
+    }
+
+    const inserted = await db.insertQuizResult(payload)
+    return res.status(201).json({ id: inserted.id, createdAt: inserted.created_at })
+  } catch (err) {
+    console.error('Failed to persist quiz result:', err && err.stack ? err.stack : err)
+    res.status(500).json({ error: 'Failed to persist quiz result' })
+  }
+})
+
+// Admin: recompute & update computed meta for a single row
+app.post('/api/results/:id/recompute', async (req, res) => {
+  try {
+    const id = req.params.id
+    const { rows } = await db.pool.query('SELECT raw_payload, meta FROM quiz_results WHERE id=$1', [id])
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'not found' })
+    const raw = rows[0].raw_payload || {}
+    const meta = rows[0].meta || {}
+    const computed = computeResultFromPayload(raw)
+    if (!computed) return res.status(400).json({ error: 'insufficient inputs to compute' })
+    meta.computed = computed
+    await db.pool.query('UPDATE quiz_results SET meta=$1 WHERE id=$2', [meta, id])
+    return res.json({ id, computed })
+  } catch (e) {
+    console.error('Recompute failed', e)
+    res.status(500).json({ error: 'recompute failed' })
+  }
+})
+
+// Admin: backfill all rows missing computed meta (careful on large DBs)
+app.post('/api/results/backfill-missing', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit || '100', 10)
+    const { rows } = await db.pool.query("SELECT id, raw_payload FROM quiz_results WHERE (meta->'computed') IS NULL LIMIT $1", [limit])
+    const updated = []
+    for (const r of rows) {
+      const computed = computeResultFromPayload(r.raw_payload || {})
+      if (computed) {
+        const meta = { computed }
+        await db.pool.query('UPDATE quiz_results SET meta=$1 WHERE id=$2', [meta, r.id])
+        updated.push(r.id)
+      }
+    }
+    return res.json({ updated, count: updated.length })
+  } catch (e) {
+    console.error('Backfill failed', e)
+    res.status(500).json({ error: 'backfill failed' })
+  }
+})
+
+// GET /api/results/aggregated-stats - Get aggregated strain level statistics
+app.get('/api/results/aggregated-stats', async (req, res) => {
+  try {
+    const stats = await db.getAggregatedStrainStats()
+    res.json(stats)
+  } catch (err) {
+    console.error('Failed to fetch aggregated stats:', err && err.message ? err.message : err)
+    res.status(500).json({ error: 'Failed to fetch aggregated stats' })
+  }
+})
+
 // Serve built frontend if present (production)
-const port = process.env.PORT || 4000
 const distPath = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath))
@@ -579,4 +705,17 @@ if (fs.existsSync(distPath)) {
   console.log('Serving static frontend from', distPath)
 }
 
-app.listen(port, () => console.log(`Airtable helper server running on http://localhost:${port}`))
+// Start server after ensuring DB schema exists
+async function start() {
+  try {
+    await db.init()
+  } catch (err) {
+    console.error('Failed to initialize database:', err && err.stack ? err.stack : err)
+    process.exit(1)
+  }
+
+  const port = process.env.PORT || 4000
+  app.listen(port, () => console.log(`Airtable helper server running on http://localhost:${port}`))
+}
+
+start()

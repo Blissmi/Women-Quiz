@@ -6,12 +6,28 @@ import { StrainBadge } from '@/components/results/StrainBadge'
 import { InsightCard, ActionTile } from '@/components/results/Cards'
 import { SectionHeader } from '@/components/results/SectionHeader'
 import { CTASection } from '@/components/results/CTASection'
+import { BubbleChart } from '@/components/results/BubbleChart'
 import { QuizAnswers } from '@/components/QuizResults'
 import { fetchGoalMappings, mapGoalsToBuckets, GoalMappingRecord } from '@/utils/goals'
 import { fetchContentBlocks, ContentBlock } from '@/utils/content'
 import { getStrainLevel } from '@/utils/strain'
 import { mapSymptomsToKeys, mapKeysToLabels } from '@/utils/symptoms'
 import { useEffect, useState } from 'react'
+
+// Persist or generate an anonymous user id so `user_id` is not null in DB
+const getOrCreateUserId = () => {
+  try {
+    let uid = localStorage.getItem('blissmi_userId')
+    if (!uid) {
+      uid = `anon-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      localStorage.setItem('blissmi_userId', uid)
+    }
+    return uid
+  } catch (e) {
+    // localStorage may be unavailable in some contexts (SSR, privacy settings)
+    return `anon-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
+}
 
 type StrainVariant = 'stable' | 'pressure' | 'attention'
 
@@ -148,7 +164,7 @@ export function ResultsLandingPage({ answers, onUnlock, onDownload, onStartOver 
     async function loadMappings() {
       try {
         setIsContentLoading(true)
-        const serverBase = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+        const serverBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
         const records: GoalMappingRecord[] = await fetchGoalMappings(answers.lifeStage, answers.healthFocus, serverBase)
         const mapped = mapGoalsToBuckets(answers.lifeStage, answers.healthFocus, records)
         if (!mounted) return
@@ -165,12 +181,51 @@ export function ResultsLandingPage({ answers, onUnlock, onDownload, onStartOver 
     }
   }, [answers.lifeStage, answers.healthFocus])
 
+  // POST assembled result to server once per view
+  useEffect(() => {
+    let mounted = true
+    let sent = false
+    async function postResult() {
+      try {
+        if (!assembledResponse || sent) return
+        const serverBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+        // Ensure server-computable inputs exist and include a persistent anonymous user id
+        const sanitizedAnswers = {
+          ...answers,
+          energy: answers.energy ?? 'I feel fine',
+          sleep: answers.sleep ?? '7–8 hours, good quality',
+          stress: answers.stress ?? 'Low',
+        }
+
+        const payload = {
+          userId: getOrCreateUserId(),
+          sessionId: `web-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+          score: null,
+          answers: sanitizedAnswers,
+          meta: assembledResponse.meta,
+        }
+        const res = await fetch(`${serverBase}/api/results`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        if (!mounted) return
+        if (!res.ok) {
+          // don't block user; just log
+          console.warn('Failed to persist results', await res.text())
+        } else {
+          sent = true
+        }
+      } catch (err) {
+        console.warn('Error posting results', err)
+      }
+    }
+    postResult()
+    return () => { mounted = false }
+  }, [assembledResponse])
+
   // Fetch content blocks and pick the right blocks per rules
   useEffect(() => {
     let mounted = true
     async function loadContent() {
       try {
-        const serverBase = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+        const serverBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
         // fetch a reduced set of block types
         const records: ContentBlock[] = await fetchContentBlocks(undefined, serverBase)
 
@@ -315,6 +370,16 @@ export function ResultsLandingPage({ answers, onUnlock, onDownload, onStartOver 
               <p className="text-sm text-neutral-500 mt-2">Primary focus: <span className="text-rose-600 font-medium">{primaryBucket}</span></p>
             )}
             {/* loading spinner removed per request */}
+        </motion.div>
+
+        {/* 1b. Aggregated Results Bubble Chart */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="bg-white rounded-lg shadow-md p-6 md:p-8"
+        >
+          <BubbleChart />
         </motion.div>
 
         {/* 2. Context card */}

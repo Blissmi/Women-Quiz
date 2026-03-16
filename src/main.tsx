@@ -5,6 +5,10 @@ import { createRoot } from 'react-dom/client'
 import './utils/disableExternalShare'
 import App from './App'
 import './index.css'
+// Dev-time fetch watcher: enable in development or when VITE_DEBUG_FETCH=true
+if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_FETCH === 'true') {
+  import('./debug/fetchWatcher')
+}
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

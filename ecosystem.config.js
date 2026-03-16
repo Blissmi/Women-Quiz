@@ -3,7 +3,9 @@ module.exports = {
     {
       name: 'quiz-app',
       script: 'npm',
-      args: 'run server',
+      args: 'run start',
+      // Load environment variables from .env.local when starting via PM2
+      env_file: '.env.local',
       cwd: __dirname,
       env: {
         NODE_ENV: 'development'
