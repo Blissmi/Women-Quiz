@@ -101,21 +101,29 @@ async function insertQuizResult(payload) {
   }
 }
 
-async function getAggregatedStrainStats() {
-  // Fetch results from the last hour and count by strain level
-  const query = `
+async function getAggregatedStrainStats(range) {
+  // range: 'hour' (default), 'day' (last 24 hours), or 'overall'
+  const baseQuery = `
     SELECT 
       meta->'computed'->>'strainLevel' as strain_level,
       COUNT(*) as count
     FROM quiz_results
     WHERE meta IS NOT NULL AND meta->'computed'->>'strainLevel' IS NOT NULL
-      AND created_at > NOW() - INTERVAL '1 hour'
-    GROUP BY meta->'computed'->>'strainLevel'
   `
-  
+
+  let query
+  if (range === 'overall') {
+    query = baseQuery + " GROUP BY meta->'computed'->>'strainLevel'"
+  } else if (range === 'day') {
+    query = baseQuery + " AND created_at > NOW() - INTERVAL '24 hours' GROUP BY meta->'computed'->>'strainLevel'"
+  } else {
+    // default: last hour
+    query = baseQuery + " AND created_at > NOW() - INTERVAL '1 hour' GROUP BY meta->'computed'->>'strainLevel'"
+  }
+
   try {
     const { rows } = await pool.query(query)
-    
+
     // Count by strain level
     let green = 0, amber = 0, red = 0
     rows.forEach(row => {
@@ -124,9 +132,9 @@ async function getAggregatedStrainStats() {
       else if (level === 'amber') amber = parseInt(row.count, 10)
       else if (level === 'red') red = parseInt(row.count, 10)
     })
-    
+
     const total = green + amber + red
-    
+
     return {
       green: { count: green, percentage: total > 0 ? ((green / total) * 100).toFixed(1) : 0 },
       amber: { count: amber, percentage: total > 0 ? ((amber / total) * 100).toFixed(1) : 0 },

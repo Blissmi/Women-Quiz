@@ -687,13 +687,281 @@ app.post('/api/results/backfill-missing', async (req, res) => {
 // GET /api/results/aggregated-stats - Get aggregated strain level statistics
 app.get('/api/results/aggregated-stats', async (req, res) => {
   try {
-    const stats = await db.getAggregatedStrainStats()
+    const range = req.query.range === 'overall' ? 'overall' : (req.query.range === 'day' ? 'day' : 'hour')
+    const stats = await db.getAggregatedStrainStats(range)
     res.json(stats)
   } catch (err) {
     console.error('Failed to fetch aggregated stats:', err && err.message ? err.message : err)
     res.status(500).json({ error: 'Failed to fetch aggregated stats' })
   }
 })
+
+// Debug: return aggregated stats for hour, 24 hours, and overall in one response
+app.get('/api/results/aggregated-stats/summary', async (req, res) => {
+  try {
+    const hour = await db.getAggregatedStrainStats('hour')
+    const day = await db.getAggregatedStrainStats('day')
+    const overall = await db.getAggregatedStrainStats('overall')
+    res.json({ hour, day, overall })
+  } catch (err) {
+    console.error('Failed to fetch aggregated stats summary:', err && err.message ? err.message : err)
+    res.status(500).json({ error: 'Failed to fetch aggregated stats summary' })
+  }
+})
+
+// POST /api/send-report - Send aggregated report via email with PDF attachment
+app.post('/api/send-report', async (req, res) => {
+  try {
+    const { pdfBase64, fileName, recipientEmail, subject, body } = req.body
+
+    if (!pdfBase64 || !fileName || !recipientEmail || !subject || !body) {
+      return res.status(400).json({ error: 'Missing required fields: pdfBase64, fileName, recipientEmail, subject, body' })
+    }
+
+    // Convert base64 to buffer
+    const pdfBuffer = Buffer.from(pdfBase64, 'base64')
+
+    // Send email with PDF attachment
+    const emailSent = await sendEmailWithAttachment(subject, body, pdfBuffer, fileName, recipientEmail)
+
+    if (!emailSent) {
+      return res.status(500).json({ error: 'Failed to send email' })
+    }
+
+    res.json({ success: true, message: 'Report sent successfully' })
+  } catch (err) {
+    console.error('Failed to send report:', err && err.message ? err.message : err)
+    res.status(500).json({ error: 'Failed to send report' })
+  }
+})
+
+// Helper function to format the report email
+function formatReportEmail(name, reportData) {
+  const { hour, day, overall, generatedAt } = reportData
+  const formatDate = (dateStr) => new Date(dateStr).toLocaleString()
+
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+      <h2 style="color: #374151;">Workforce Strain Index Report</h2>
+      <p>Hi ${name},</p>
+      <p>Here's your personalized Workforce Strain Index Report generated on <strong>${formatDate(generatedAt)}</strong></p>
+
+      <div style="margin: 30px 0;">
+        <h3 style="color: #f97316;">Last 1 Hour Results</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+          <tr style="background-color: #f3f4f6;">
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: left;">Category</th>
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">Count</th>
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">Percentage</th>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🟢 Stable</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.green.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.green.percentage}%</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🟡 Under Pressure</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.amber.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.amber.percentage}%</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🔴 Needs Attention</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.red.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.red.percentage}%</td>
+          </tr>
+          <tr style="background-color: #f3f4f6; font-weight: bold;">
+            <td style="border: 1px solid #d1d5db; padding: 10px;">Total</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${hour.total}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">100%</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin: 30px 0;">
+        <h3 style="color: #f97316;">Last 24 Hours Results</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+          <tr style="background-color: #f3f4f6;">
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: left;">Category</th>
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">Count</th>
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">Percentage</th>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🟢 Stable</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.green.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.green.percentage}%</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🟡 Under Pressure</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.amber.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.amber.percentage}%</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🔴 Needs Attention</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.red.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.red.percentage}%</td>
+          </tr>
+          <tr style="background-color: #f3f4f6; font-weight: bold;">
+            <td style="border: 1px solid #d1d5db; padding: 10px;">Total</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${day.total}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">100%</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin: 30px 0;">
+        <h3 style="color: #f97316;">Overall Results (All Time)</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+          <tr style="background-color: #f3f4f6;">
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: left;">Category</th>
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">Count</th>
+            <th style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">Percentage</th>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🟢 Stable</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.green.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.green.percentage}%</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🟡 Under Pressure</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.amber.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.amber.percentage}%</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #d1d5db; padding: 10px;">🔴 Needs Attention</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.red.count}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.red.percentage}%</td>
+          </tr>
+          <tr style="background-color: #f3f4f6; font-weight: bold;">
+            <td style="border: 1px solid #d1d5db; padding: 10px;">Total</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">${overall.total}</td>
+            <td style="border: 1px solid #d1d5db; padding: 10px; text-align: right;">100%</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #d1d5db;">
+        <p style="color: #6b7280; font-size: 12px;">
+          This report was automatically generated by Blissmi Women's Health Quiz.<br>
+          For questions or support, please contact us.
+        </p>
+      </div>
+    </div>
+  `
+
+  return {
+    to: email,
+    subject: `Your Workforce Strain Index Report - ${formatDate(generatedAt)}`,
+    html: htmlContent,
+    text: `Workforce Strain Index Report\n\nHi ${name},\n\nYour report has been generated. Please view this email in an HTML-compatible mail client to see the full report with charts and tables.`
+  }
+}
+
+// Helper function to send email - uses nodemailer if configured, else logs
+async function sendEmailReport(email, emailContent) {
+  // Check if nodemailer is configured
+  const nodemailer = require('nodemailer')
+  const SMTPHost = process.env.SMTP_HOST
+  const SMTPPort = process.env.SMTP_PORT
+  const SMTPUser = process.env.SMTP_USER
+  const SMTPPass = process.env.SMTP_PASS
+
+  if (SMTPHost && SMTPPort && SMTPUser && SMTPPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: SMTPHost,
+        port: parseInt(SMTPPort, 10),
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: {
+          user: SMTPUser,
+          pass: SMTPPass
+        }
+      })
+
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM || SMTPUser,
+        to: emailContent.to,
+        subject: emailContent.subject,
+        html: emailContent.html,
+        text: emailContent.text
+      })
+
+      console.log('Email sent to:', emailContent.to)
+      return true
+    } catch (err) {
+      console.error('Failed to send email via SMTP:', err && err.message ? err.message : err)
+      return false
+    }
+  } else {
+    // Fallback: log the email content for development
+    console.log('Email sending not configured. Email content:')
+    console.log('To:', emailContent.to)
+    console.log('Subject:', emailContent.subject)
+    if ((process.env.DEBUG || '').toLowerCase() === 'true') {
+      console.log('HTML Content:', emailContent.html)
+    }
+    return true // For development, consider it sent
+  }
+}
+
+// Helper function to send email with PDF attachment
+async function sendEmailWithAttachment(subject, body, pdfBuffer, fileName, recipientEmail) {
+  try {
+    const nodemailer = require('nodemailer')
+    const SMTPHost = process.env.SMTP_HOST
+    const SMTPPort = process.env.SMTP_PORT
+    const SMTPUser = process.env.SMTP_USER
+    const SMTPPass = process.env.SMTP_PASS
+    const SMTPFromEmail = process.env.SMTP_FROM || SMTPUser
+
+    if (SMTPHost && SMTPPort && SMTPUser && SMTPPass) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: SMTPHost,
+          port: parseInt(SMTPPort, 10),
+          secure: process.env.SMTP_SECURE === 'true',
+          auth: {
+            user: SMTPUser,
+            pass: SMTPPass
+          }
+        })
+
+        // Use the provided recipient email
+        const emailTo = recipientEmail || SMTPUser
+        
+        await transporter.sendMail({
+          from: SMTPFromEmail,
+          to: emailTo,
+          subject: subject,
+          text: body,
+          attachments: [
+            {
+              filename: fileName,
+              content: pdfBuffer,
+              contentType: 'application/pdf'
+            }
+          ]
+        })
+
+        console.log('Email with PDF attachment sent to', emailTo)
+        return true
+      } catch (err) {
+        console.error('Failed to send email via SMTP:', err && err.message ? err.message : err)
+        return false
+      }
+    } else {
+      // Fallback: log that email sending is not configured
+      console.log('Email sending not configured. Would have sent:')
+      console.log('To:', recipientEmail || 'not specified')
+      console.log('Subject:', subject)
+      console.log('Body:', body)
+      console.log('Attachment:', fileName, `(${pdfBuffer.length} bytes)`)
+      return true // For development, consider it sent
+    }
+  } catch (err) {
+    console.error('Error in sendEmailWithAttachment:', err && err.message ? err.message : err)
+    return false
+  }
+}
 
 // Serve built frontend if present (production)
 const distPath = path.join(__dirname, '..', 'dist')

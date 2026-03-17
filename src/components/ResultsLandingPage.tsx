@@ -211,6 +211,14 @@ export function ResultsLandingPage({ answers, onUnlock, onDownload, onStartOver 
           console.warn('Failed to persist results', await res.text())
         } else {
           sent = true
+          try {
+            // Notify any frontend listeners that a new result was posted so they can refresh
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+              window.dispatchEvent(new CustomEvent('results:posted'))
+            }
+          } catch (e) {
+            // ignore
+          }
         }
       } catch (err) {
         console.warn('Error posting results', err)
